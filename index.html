@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Location Tracker">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>📍</text></svg>">
+<title>Location Tracker</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; padding: 16px; padding-bottom: 80px; }
+.header { background: #2c3e50; color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+.header h1 { font-size: 24px; }
+.card { background: white; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.location-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; }
+.location-btn { padding: 16px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; font-weight: 600; background: white; color: #2c3e50; }
+.location-btn:active { background: #3498db; color: white; border-color: #3498db; transform: scale(0.95); }
+.current-day { background: #ecf0f1; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+.date-display { font-weight: 600; color: #2c3e50; margin-bottom: 12px; font-size: 18px; }
+.route-chain { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 40px; }
+.location-tag { background: #3498db; color: white; padding: 8px 12px; border-radius: 6px; font-weight: 600; }
+.arrow { color: #7f8c8d; font-weight: bold; }
+.btn { width: 100%; padding: 16px; border: none; border-radius: 8px; font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.btn-save { background: #27ae60; color: white; }
+.btn-clear { background: #e74c3c; color: white; }
+.btn-export { background: #95a5a6; color: white; }
+.day-item { background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #3498db; }
+.day-date { font-weight: 600; color: #2c3e50; margin-bottom: 8px; }
+.day-route { color: #555; line-height: 1.6; }
+.delete-btn { background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 6px; margin-top: 8px; font-size: 14px; }
+.empty-state { text-align: center; padding: 40px 20px; color: #999; }
+.date-input { width: 100%; padding: 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<div class="header"><h1>📍 Location Tracker</h1></div>
+<div class="card">
+<h2 style="margin-bottom: 16px; color: #2c3e50;">Today's Route</h2>
+<input type="date" id="currentDate" class="date-input">
+<div class="current-day">
+<div class="date-display" id="dateDisplay"></div>
+<div class="route-chain" id="routeChain"><span style="color: #999;">Tap locations to build your route</span></div>
+</div>
+<div class="location-grid">
+<button class="location-btn" onclick="addLoc('Home')">Home</button>
+<button class="location-btn" onclick="addLoc('Burbank')">Burbank</button>
+<button class="location-btn" onclick="addLoc('Glendale')">Glendale</button>
+<button class="location-btn" onclick="addLoc('Downey')">Downey</button>
+<button class="location-btn" onclick="addLoc('Buena Park')">Buena Park</button>
+<button class="location-btn" onclick="addLoc('West Covina')">West Covina</button>
+<button class="location-btn" onclick="addLoc('Northridge')">Northridge</button>
+<button class="location-btn" onclick="addLoc('Malt')">Malt</button>
+<button class="location-btn" onclick="addLoc('Garfield')">Garfield</button>
+</div>
+<button class="btn btn-clear" onclick="clearDay()">Clear Today</button>
+<button class="btn btn-save" onclick="saveDay()">Save Day</button>
+</div>
+<div class="card">
+<h2 style="margin-bottom: 16px; color: #2c3e50;">Saved Days</h2>
+<button class="btn btn-export" onclick="copyAll()">Copy All to Clipboard</button>
+<div id="savedDays"></div>
+</div>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function(err) {
+    console.log('Service Worker registration failed:', err);
+  });
+}
+
+var route = [];
+var days = [];
+try { days = JSON.parse(localStorage.getItem('locationDays') || '[]'); } catch(e) {}
+
+var dateIn = document.getElementById('currentDate');
+var dateDisp = document.getElementById('dateDisplay');
+var routeDiv = document.getElementById('routeChain');
+var savedDiv = document.getElementById('savedDays');
+
+var today = new Date();
+var year = today.getFullYear();
+var month = String(today.getMonth() + 1).padStart(2, '0');
+var day = String(today.getDate()).padStart(2, '0');
+dateIn.value = year + '-' + month + '-' + day;
+updateDate();
+
+dateIn.addEventListener('change', updateDate);
+
+function updateDate() {
+var parts = dateIn.value.split('-');
+var d = new Date(parts[0], parts[1] - 1, parts[2]);
+dateDisp.textContent = d.toLocaleDateString('en-US', {weekday:'long',month:'long',day:'numeric',year:'numeric'});
+}
+
+function renderRoute() {
+if (route.length === 0) {
+routeDiv.innerHTML = '<span style="color: #999;">Tap locations to build your route</span>';
+return;
+}
+var h = '';
+for (var i = 0; i < route.length; i++) {
+if (i > 0) h += '<span class="arrow">→</span>';
+h += '<span class="location-tag">' + route[i] + '</span>';
+}
+routeDiv.innerHTML = h;
+}
+
+function renderDays() {
+if (days.length === 0) {
+savedDiv.innerHTML = '<div class="empty-state">No saved days yet</div>';
+return;
+}
+var h = '';
+for (var i = 0; i < days.length; i++) {
+var day = days[i];
+var parts = day.date.split('-');
+var d = new Date(parts[0], parts[1] - 1, parts[2]);
+var fd = d.toLocaleDateString('en-US', {weekday:'short',month:'short',day:'numeric',year:'numeric'});
+h += '<div class="day-item">';
+h += '<div class="day-date">' + fd + '</div>';
+h += '<div class="day-route">' + day.route.join(' → ') + '</div>';
+h += '<button class="delete-btn" onclick="delDay(\'' + day.date + '\')">Delete</button>';
+h += '</div>';
+}
+savedDiv.innerHTML = h;
+}
+
+function addLoc(loc) {
+route.push(loc);
+renderRoute();
+}
+
+function clearDay() {
+if (route.length > 0 && !confirm('Clear today\'s route?')) return;
+route = [];
+renderRoute();
+}
+
+function saveDay() {
+if (route.length === 0) {
+alert('Add at least one location first');
+return;
+}
+var d = dateIn.value;
+var idx = -1;
+for (var i = 0; i < days.length; i++) {
+if (days[i].date === d) { idx = i; break; }
+}
+if (idx >= 0) {
+if (!confirm('This date already has a route. Replace it?')) return;
+days[idx] = {date: d, route: route.slice()};
+} else {
+days.unshift({date: d, route: route.slice()});
+}
+try {
+localStorage.setItem('locationDays', JSON.stringify(days));
+} catch(e) {
+alert('Could not save: ' + e.message);
+return;
+}
+route = [];
+renderRoute();
+renderDays();
+var parts = d.split('-');
+var nd = new Date(parts[0], parts[1] - 1, parts[2]);
+nd.setDate(nd.getDate() + 1);
+var nyear = nd.getFullYear();
+var nmonth = String(nd.getMonth() + 1).padStart(2, '0');
+var nday = String(nd.getDate()).padStart(2, '0');
+dateIn.value = nyear + '-' + nmonth + '-' + nday;
+updateDate();
+}
+
+function delDay(d) {
+if (!confirm('Delete this day?')) return;
+var nd = [];
+for (var i = 0; i < days.length; i++) {
+if (days[i].date !== d) nd.push(days[i]);
+}
+days = nd;
+try { localStorage.setItem('locationDays', JSON.stringify(days)); } catch(e) {}
+renderDays();
+}
+
+function copyAll() {
+if (days.length === 0) {
+alert('No days to export');
+return;
+}
+var t = '';
+for (var i = 0; i < days.length; i++) {
+var day = days[i];
+var parts = day.date.split('-');
+var d = new Date(parts[0], parts[1] - 1, parts[2]);
+var fd = d.toLocaleDateString('en-US', {month:'numeric',day:'numeric',year:'numeric'});
+t += fd + ': ' + day.route.join(' → ') + '\n';
+}
+if (navigator.clipboard && navigator.clipboard.writeText) {
+navigator.clipboard.writeText(t).then(function() {
+alert('Copied to clipboard!');
+}).catch(function() {
+prompt('Copy this text:', t);
+});
+} else {
+prompt('Copy this text:', t);
+}
+}
+
+renderDays();
+</script>
+</body>
+</html>
